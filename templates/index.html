@@ -1,0 +1,290 @@
+{% extends "base.html" %} {% block title %}Home{% endblock %} {% block content
+%}
+
+<!-- ── Hero ─────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-glow g1"></div>
+  <div class="hero-glow g2"></div>
+
+  <div class="hero-content">
+    <div class="hero-badge reveal">CIE 552 · Computer Vision Project</div>
+
+    <h1 class="hero-title reveal delay-1">
+      American Sign Language<br />
+      <span class="grad-text">Recognition System</span>
+    </h1>
+
+    <p class="hero-sub reveal delay-2">
+      Real-time hand gesture classification using deep learning,<br />
+      MediaPipe landmarks, and TensorFlow Lite — deployed on the web.
+    </p>
+
+    <div class="hero-actions reveal delay-3">
+      <a href="/predict" class="btn-primary">Try the Model</a>
+      <a href="#about" class="btn-ghost">Learn More ↓</a>
+    </div>
+
+    <div class="hero-stats reveal delay-4">
+      <div class="stat">
+        <span class="stat-n">98.9<span style="font-size: 0.5em">%</span></span>
+        <span class="stat-l">Landmark Accuracy</span>
+      </div>
+      <div class="stat-div"></div>
+      <div class="stat">
+        <span class="stat-n">26</span>
+        <span class="stat-l">ASL Letters</span>
+      </div>
+      <div class="stat-div"></div>
+      <div class="stat">
+        <span class="stat-n">3</span>
+        <span class="stat-l">Model Backends</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Problem ───────────────────────────────────────────────────────── -->
+<section class="section" id="about">
+  <div class="container">
+    <div class="sec-head scroll-reveal">
+      <span class="sec-tag">The Problem</span>
+      <h2 class="sec-title">Bridging the Communication Gap</h2>
+      <p class="sec-sub">
+        Over <strong>70 million</strong> deaf and hard-of-hearing people
+        worldwide rely on sign language as their primary means of communication.
+        Automated recognition can power real-time translation tools, assistive
+        devices, and educational platforms — making the world more accessible.
+      </p>
+    </div>
+
+    <div class="feat-grid">
+      <div class="feat-card scroll-reveal">
+        <div class="feat-icon" style="--ic: #7c6aff">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="2" />
+            <path d="M12 2a10 10 0 0 1 0 20" />
+            <path d="M12 2a10 10 0 0 0 0 20" />
+            <path d="M2 12h20" />
+          </svg>
+        </div>
+        <h3>Real-Time Recognition</h3>
+        <p>
+          Live webcam inference at interactive frame rates using optimised
+          TFLite models and MediaPipe hand tracking.
+        </p>
+      </div>
+
+      <div class="feat-card scroll-reveal">
+        <div class="feat-icon" style="--ic: #00e5b0">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+        </div>
+        <h3>Multiple Backends</h3>
+        <p>
+          ResNet CNN on Sign MNIST, MobileNetV2 on real photos, and a 98.9%
+          accurate landmark MLP — choose your pipeline.
+        </p>
+      </div>
+
+      <div class="feat-card scroll-reveal">
+        <div class="feat-icon" style="--ic: #ffa94d">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </div>
+        <h3>Web Deployment</h3>
+        <p>
+          FastAPI backend serving a modern web interface for upload-based image
+          classification, accessible from any browser.
+        </p>
+      </div>
+
+      <div class="feat-card scroll-reveal">
+        <div class="feat-icon" style="--ic: #ff6b6b">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        </div>
+        <h3>Edge Ready</h3>
+        <p>
+          TFLite export enables deployment on Raspberry Pi, Android, and
+          resource-constrained hardware at the edge.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Team ──────────────────────────────────────────────────────────── -->
+<section class="section section-dark" id="team">
+  <div class="container">
+    <div class="sec-head scroll-reveal">
+      <span class="sec-tag">The Team</span>
+      <h2 class="sec-title">Meet the Developers</h2>
+    </div>
+
+    <div class="team-grid">
+      <div class="team-card scroll-reveal">
+        <div class="team-av" style="--c1: #7c6aff; --c2: #a78bfa">IH</div>
+        <h3 class="team-name">Ibrahim Hanafy</h3>
+        <p class="team-id">ID: <mark class="ph">202200518</mark></p>
+        <a class="team-email" href="mailto:s-ibrahim.hanafy@zewailcity.edu.eg"
+          >s-ibrahim.hanafy@zewailcity.edu.eg</a
+        >
+      </div>
+
+      <div class="team-card scroll-reveal">
+        <div class="team-av" style="--c1: #00e5b0; --c2: #00b4d8">TM</div>
+        <h3 class="team-name"><mark class="ph">Abdullah Ahemd</mark></h3>
+        <p class="team-id">ID: <mark class="ph">202200206</mark></p>
+        <a class="team-email" href="#"
+          ><mark class="ph">s-abdullah.abdelsamiaa@zewailcity.edu.eg</mark></a
+        >
+      </div>
+
+      <div class="team-card scroll-reveal">
+        <div class="team-av" style="--c1: #ffa94d; --c2: #ff6b6b">TM</div>
+        <h3 class="team-name"><mark class="ph">Mai Ibrahim</mark></h3>
+        <p class="team-id">ID: <mark class="ph">202200504</mark></p>
+        <a class="team-email" href="#"
+          ><mark class="ph">s-mai.ibrahim@zewailcity.edu.eg</mark></a
+        >
+      </div>
+    </div>
+
+    <!-- Supervision -->
+    <div class="sec-head scroll-reveal" style="margin-top: 5rem">
+      <span class="sec-tag">Supervision</span>
+      <h2 class="sec-title">Under the Guidance of</h2>
+    </div>
+
+    <div class="sup-grid">
+      <div class="sup-card scroll-reveal">
+        <div class="sup-icon" style="--ic: #7c6aff">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          >
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+            <path d="M6 12v5c3 3 9 3 12 0v-5" />
+          </svg>
+        </div>
+        <div>
+          <p class="sup-role">Course Instructor</p>
+          <h3 class="sup-name">
+            <mark class="ph">Dr. Mohamed Tolba</mark>
+          </h3>
+        </div>
+      </div>
+
+      <div class="sup-card scroll-reveal">
+        <div class="sup-icon" style="--ic: #00e5b0">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+          </svg>
+        </div>
+        <div>
+          <p class="sup-role">Teaching Assistant</p>
+          <h3 class="sup-name"><mark class="ph">Retaj Yousri</mark></h3>
+        </div>
+      </div>
+      <div class="sup-card scroll-reveal">
+        <div class="sup-icon" style="--ic: #00e5b0">
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+          </svg>
+        </div>
+        <div>
+          <p class="sup-role">Teaching Assistant</p>
+          <h3 class="sup-name"><mark class="ph">Mennah Mohamed</mark></h3>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Tech Stack ─────────────────────────────────────────────────────── -->
+<section class="section" id="tech">
+  <div class="container">
+    <div class="sec-head scroll-reveal">
+      <span class="sec-tag">Technology</span>
+      <h2 class="sec-title">Built With</h2>
+    </div>
+    <div class="tech-grid scroll-reveal">
+      <span class="tech-pill">Python 3.11</span>
+      <span class="tech-pill">TensorFlow · TFLite</span>
+      <span class="tech-pill">MediaPipe</span>
+      <span class="tech-pill">FastAPI</span>
+      <span class="tech-pill">OpenCV</span>
+      <span class="tech-pill">scikit-learn</span>
+      <span class="tech-pill">MobileNetV2</span>
+      <span class="tech-pill">ResNet-style CNN</span>
+      <span class="tech-pill">Pillow</span>
+      <span class="tech-pill">NumPy</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ───────────────────────────────────────────────────────────── -->
+<section class="cta-section scroll-reveal">
+  <div class="cta-glow"></div>
+  <div class="cta-content">
+    <h2>Ready to try it?</h2>
+    <p>Upload a hand sign photo and get instant ASL letter classification.</p>
+    <a href="/predict" class="btn-primary btn-lg">Launch the Model →</a>
+  </div>
+</section>
+
+{% endblock %}
