@@ -31,14 +31,14 @@ Over 70 million deaf and hard-of-hearing people worldwide rely on sign language 
 
 Five classification architectures were trained and rigorously compared on the **Sign Language MNIST** dataset (27,455 training / 7,172 test grayscale 28×28 images, 24 classes — J and Z excluded as they require motion):
 
-| Model | Test Accuracy |
-|---|---|
-| Custom CNN (baseline) | — |
-| CNN + Data Augmentation | best CNN result |
-| SVM + HOG features | — |
-| MobileNetV2 (feature extraction head) | — |
-| EfficientNetB0 (feature extraction head) | — |
-| EfficientNetB0 (fine-tuned) | — |
+| Model | Accuracy | Precision | Recall | F1 |
+|---|---|---|---|---|
+| EfficientNetB0 (fine-tuned) | **99.96%** | 99.95% | 99.97% | 99.96% |
+| EfficientNetB0 (head only) | 99.50% | 99.46% | 99.56% | 99.49% |
+| CNN + Data Augmentation | 99.04% | 99.14% | 99.13% | 99.10% |
+| MobileNetV2 (head only) | 98.66% | 98.30% | 98.71% | 98.44% |
+| SVM + HOG | 97.09% | 96.72% | 96.99% | 96.67% |
+| Custom CNN (baseline) | 95.98% | 96.54% | 95.44% | 95.69% |
 
 All confusion matrices, training curves, and a full metrics CSV are saved in `results/`.
 
