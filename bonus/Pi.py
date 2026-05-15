@@ -49,7 +49,7 @@ ALPHABET = {
     10:'K', 11:'L', 12:'M', 13:'N', 14:'O', 15:'P', 16:'Q', 17:'R',
     18:'S', 19:'T', 20:'U', 21:'V', 22:'W', 23:'X', 24:'Y'
 }
-IDX_TO_LETTER = {i: ALPHABET[k] for i, k in enumerate(sorted(ALPHABET.keys()))}
+IDX_TO_LETTER = ALPHABET  # output index = original dataset label (0-24, J=9 absent)
 
 # ── Load model ───────────────────────────────────────────────────────────────
 interpreter = Interpreter(model_path=MODEL_PATH)
@@ -70,7 +70,7 @@ def predict(roi_gray):
     probs    = np.exp(output) / np.sum(np.exp(output))
     pred_idx = np.argmax(probs)
     conf     = probs[pred_idx]
-    return IDX_TO_LETTER[pred_idx], float(conf)
+    return IDX_TO_LETTER.get(pred_idx, '?'), float(conf)
 
 # ── Camera ───────────────────────────────────────────────────────────────────
 cap = cv2.VideoCapture(CAMERA_INDEX)

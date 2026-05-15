@@ -31,7 +31,7 @@ ALPHABET = {
     18:'S', 19:'T', 20:'U', 21:'V', 22:'W', 23:'X', 24:'Y'
 }
 # Map model output index (0-24) → letter
-IDX_TO_LETTER = {i: ALPHABET[k] for i, k in enumerate(sorted(ALPHABET.keys()))}
+IDX_TO_LETTER = ALPHABET  # output index = original dataset label (0-24, J=9 absent)
 
 # ── Load TFLite model ───────────────────────────────────────────────────────
 interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
@@ -52,12 +52,10 @@ def predict(roi_gray):
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]['index'])[0]  # (25,)
 
-    # Softmax if model outputs logits (skip if already softmax)
     probs = np.exp(output) / np.sum(np.exp(output))
-
     pred_idx  = np.argmax(probs)
     conf      = probs[pred_idx]
-    letter    = IDX_TO_LETTER[pred_idx]
+    letter    = IDX_TO_LETTER.get(pred_idx, '?')
     return letter, float(conf)
 
 # ── Open camera ─────────────────────────────────────────────────────────────
