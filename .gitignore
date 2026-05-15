@@ -1,5 +1,6 @@
 .claude
 .env
+.vscode/
 TEAM_GUIDE.md
 __pycache__/
 *.pyc
