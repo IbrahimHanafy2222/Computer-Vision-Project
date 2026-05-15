@@ -89,12 +89,12 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "active": "home"})
+    return templates.TemplateResponse(request=request, name="index.html", context={"active": "home"})
 
 
 @app.get("/predict", response_class=HTMLResponse)
 async def predict_page(request: Request):
-    return templates.TemplateResponse("predict.html", {"request": request, "active": "predict"})
+    return templates.TemplateResponse(request=request, name="predict.html", context={"active": "predict"})
 
 
 # ── Upload → CNN ─────────────────────────────────────────────────────────

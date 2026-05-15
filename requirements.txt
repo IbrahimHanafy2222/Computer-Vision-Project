@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-python-multipart
-Pillow
-tensorflow
-jinja2
-mediapipe

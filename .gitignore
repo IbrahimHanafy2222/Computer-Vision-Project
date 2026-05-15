@@ -1,3 +1,8 @@
 .claude
+.env
+TEAM_GUIDE.md
+__pycache__/
+*.pyc
+bonus/api/Vision-Project/
 
 
