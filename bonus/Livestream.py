@@ -1,61 +1,61 @@
 """
-LAPTOP SCRIPT — Real-time ASL inference with MediaPipe hand tracking.
-Compatible with mediapipe >= 0.10 (Tasks API).
+ASL Real-Time Recognition — MediaPipe + selectable model backend.
 
 Requirements:
-    pip install tensorflow opencv-python numpy mediapipe
+    pip install tensorflow opencv-python numpy mediapipe scikit-learn joblib
 
 On first run, downloads hand_landmarker.task (~8 MB) automatically.
 
 Usage:
-    python Livestream.py
-    python Livestream.py --camera 1       # try 1, 2 for iVCam
-    python Livestream.py --no-landmarks   # hide finger skeleton
-    python Livestream.py --debug          # save every crop to debug_crops/
+    python Livestream.py                        # interactive model prompt
+    python Livestream.py --model cnn            # Robust CNN  (Sign MNIST 28×28)
+    python Livestream.py --model optionA        # Real-Photo CNN (ASL Alphabet 64×64)
+    python Livestream.py --model optionB        # Landmark MLP  (no pixels)
+    python Livestream.py --model cnn --camera 1
 
 Controls:
     q  — quit
     s  — save screenshot
     l  — toggle landmark overlay
-    p  — toggle 28x28 preview
-    d  — toggle debug crop saving
-    m  — cycle preprocessing mode (clahe / equalize / stretch / thresh)
 """
 
 import argparse
 import os
+import sys
 import time
 import urllib.request
 
 import cv2
 import mediapipe as mp
 import numpy as np
-import tensorflow as tf
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
-ASL_MODEL_PATH  = os.path.join(SCRIPT_DIR, "asl_model.tflite")
 HAND_MODEL_PATH = os.path.join(SCRIPT_DIR, "hand_landmarker.task")
-DEBUG_DIR       = os.path.join(SCRIPT_DIR, "debug_crops")
 HAND_MODEL_URL  = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 )
 
-INPUT_SIZE  = 28
-CONF_THRESH = 0.5
-SMOOTH_N    = 7
-PAD_FRAC    = 0.20   # tighter crop — less arm/background noise
+MODEL_PATHS = {
+    "cnn":     os.path.join(SCRIPT_DIR, "asl_model.tflite"),
+    "optionA": os.path.join(SCRIPT_DIR, "webcam_trials", "models", "optionA.tflite"),
+    "optionB": os.path.join(SCRIPT_DIR, "webcam_trials", "models", "optionB.pkl"),
+}
 
-ALPHABET = {
+# ── Label maps ────────────────────────────────────────────────────────────────
+# CNN / Option B (25 classes — Sign MNIST, no J no Z)
+ALPHABET_25 = {
     0:'A', 1:'B', 2:'C', 3:'D', 4:'E', 5:'F', 6:'G', 7:'H', 8:'I',
     10:'K', 11:'L', 12:'M', 13:'N', 14:'O', 15:'P', 16:'Q', 17:'R',
     18:'S', 19:'T', 20:'U', 21:'V', 22:'W', 23:'X', 24:'Y'
 }
-IDX_TO_LETTER = {i: ALPHABET[i] for i in range(25) if i in ALPHABET}
+# Option A (26 classes — A-Z real photos)
+ALPHABET_26 = {i: chr(65 + i) for i in range(26)}
 
+# ── Hand skeleton ─────────────────────────────────────────────────────────────
 HAND_CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,4),
     (0,5),(5,6),(6,7),(7,8),
@@ -66,83 +66,79 @@ HAND_CONNECTIONS = [
 ]
 FINGERTIPS = {4, 8, 12, 16, 20}
 
-PREP_MODES = ['clahe', 'equalize', 'stretch', 'thresh']
+# ── Smoothing ─────────────────────────────────────────────────────────────────
+SMOOTH_N  = 7
+CONF_THRESH = 0.5
+PAD_FRAC  = 0.20
 
 
-# ── Preprocessing modes ───────────────────────────────────────────────────────
-def preprocess(crop_bgr, mode='stretch'):
-    """
-    Convert BGR hand crop → 28x28 float32 [0,1].
-
-    Sign MNIST images have hands with clear contrast on neutral background.
-    'stretch' aggressively normalises histogram so the hand fills full 0-255.
-    'thresh'  binarises — most similar to Sign MNIST silhouettes.
-    'equalize'/'clahe' are gentler alternatives.
-    """
-    gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
-
-    if mode == 'clahe':
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
-        gray  = clahe.apply(gray)
-
-    elif mode == 'equalize':
-        gray = cv2.equalizeHist(gray)
-
-    elif mode == 'stretch':
-        lo, hi = gray.min(), gray.max()
-        if hi > lo:
-            gray = ((gray.astype(np.float32) - lo) / (hi - lo) * 255).astype(np.uint8)
-
-    elif mode == 'thresh':
-        # Otsu threshold → binary image (hand=white on black like Sign MNIST)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, gray = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    resized = cv2.resize(gray, (INPUT_SIZE, INPUT_SIZE), interpolation=cv2.INTER_AREA)
-    return resized.astype(np.float32) / 255.0
-
-
-# ── Utilities ─────────────────────────────────────────────────────────────────
-def ensure_hand_model(path, url):
-    if os.path.exists(path):
-        return
-    print(f"Downloading hand_landmarker.task (~8 MB)...")
-    urllib.request.urlretrieve(url, path)
-    print("Download complete.")
-
-
-def load_asl_model(path):
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"ASL model not found: {path}")
+# ── Model loaders ─────────────────────────────────────────────────────────────
+def load_tflite(path):
+    import tensorflow as tf
     interp = tf.lite.Interpreter(model_path=path)
     interp.allocate_tensors()
     return interp, interp.get_input_details(), interp.get_output_details()
 
 
-def predict_asl(interp, inp_det, out_det, img_28x28):
-    tensor = img_28x28.reshape(1, INPUT_SIZE, INPUT_SIZE, 1)
+def load_optionB(path):
+    import joblib
+    bundle = joblib.load(path)
+    return bundle['mlp'], bundle['scaler'], bundle['classes']
+
+
+# ── Preprocessing ─────────────────────────────────────────────────────────────
+def preprocess_cnn(crop_bgr, input_size):
+    """Stretch histogram → resize → float32 [0,1]."""
+    gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+    lo, hi = gray.min(), gray.max()
+    if hi > lo:
+        gray = ((gray.astype(np.float32) - lo) / (hi - lo) * 255).astype(np.uint8)
+    resized = cv2.resize(gray, (input_size, input_size), interpolation=cv2.INTER_AREA)
+    return resized.astype(np.float32) / 255.0, resized
+
+
+def preprocess_optionA(crop_bgr, input_size=64):
+    """RGB resize → float32 [0,1] for real-photo model."""
+    rgb     = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+    resized = cv2.resize(rgb, (input_size, input_size), interpolation=cv2.INTER_AREA)
+    return resized.astype(np.float32) / 255.0, resized
+
+
+def landmarks_to_features(landmarks):
+    """21 MediaPipe landmarks → 63-dim normalised feature vector."""
+    pts = np.array([[lm.x, lm.y, lm.z] for lm in landmarks], dtype=np.float32)
+    pts -= pts[0]                          # translate: wrist at origin
+    scale = np.linalg.norm(pts[9])        # wrist→middle-MCP distance
+    if scale > 1e-6:
+        pts /= scale
+    return pts.flatten()                   # (63,)
+
+
+# ── Inference ─────────────────────────────────────────────────────────────────
+def infer_tflite(interp, inp_det, out_det, img_array, channels):
+    if channels == 1:
+        tensor = img_array.reshape(1, img_array.shape[0], img_array.shape[1], 1)
+    else:
+        tensor = img_array.reshape(1, img_array.shape[0], img_array.shape[1], 3)
     interp.set_tensor(inp_det[0]['index'], tensor)
     interp.invoke()
-    probs    = interp.get_tensor(out_det[0]['index'])[0]  # already softmax
+    probs    = interp.get_tensor(out_det[0]['index'])[0]
     pred_idx = int(np.argmax(probs))
-    return IDX_TO_LETTER.get(pred_idx, '?'), float(probs[pred_idx]), probs
+    return pred_idx, float(probs[pred_idx]), probs
 
 
-def hand_bbox(landmarks, frame_h, frame_w, pad_frac=PAD_FRAC):
-    xs = [lm.x * frame_w for lm in landmarks]
-    ys = [lm.y * frame_h for lm in landmarks]
-    pad_x = (max(xs) - min(xs)) * pad_frac
-    pad_y = (max(ys) - min(ys)) * pad_frac
-    x1 = max(0, int(min(xs) - pad_x))
-    y1 = max(0, int(min(ys) - pad_y))
-    x2 = min(frame_w, int(max(xs) + pad_x))
-    y2 = min(frame_h, int(max(ys) + pad_y))
-    return x1, y1, x2, y2
+def infer_optionB(mlp, scaler, classes, features):
+    feat_scaled = scaler.transform(features.reshape(1, -1))
+    probs       = mlp.predict_proba(feat_scaled)[0]
+    pred_idx    = int(np.argmax(probs))
+    # classes is an array of label strings (e.g. ['A','B',...])
+    letter      = classes[pred_idx] if pred_idx < len(classes) else '?'
+    return letter, float(probs[pred_idx]), probs, classes
 
 
-def draw_landmarks(frame, landmarks, frame_h, frame_w):
-    pts = {i: (int(lm.x * frame_w), int(lm.y * frame_h))
-           for i, lm in enumerate(landmarks)}
+# ── Drawing helpers ───────────────────────────────────────────────────────────
+def draw_landmarks(frame, landmarks, h, w):
+    pts = {i: (int(lm.x * w), int(lm.y * h)) for i, lm in enumerate(landmarks)}
     for a, b in HAND_CONNECTIONS:
         cv2.line(frame, pts[a], pts[b], (0, 220, 255), 2)
     for i, (x, y) in pts.items():
@@ -151,50 +147,100 @@ def draw_landmarks(frame, landmarks, frame_h, frame_w):
         cv2.circle(frame, (x, y), r, (0, 180, 255), 1)
 
 
-def draw_top5(frame, probs, origin=(10, 60)):
+def draw_top5(frame, probs, label_map, origin=(10, 60)):
+    if isinstance(label_map, np.ndarray):
+        get_letter = lambda i: label_map[i] if i < len(label_map) else '?'
+    else:
+        get_letter = lambda i: label_map.get(i, '?')
     top5   = np.argsort(probs)[::-1][:5]
     ox, oy = origin
-    bar_w  = 120
-    bar_h  = 14
-    gap    = 20
     for rank, idx in enumerate(top5):
-        y     = oy + rank * gap
-        conf  = float(probs[idx])
-        color = (0, 220, 80) if rank == 0 else (80, 140, 200)
-        cv2.rectangle(frame, (ox, y), (ox + bar_w, y + bar_h), (40, 40, 40), -1)
-        cv2.rectangle(frame, (ox, y), (ox + int(bar_w * conf), y + bar_h), color, -1)
-        cv2.putText(frame,
-                    f"{IDX_TO_LETTER.get(idx,'?')} {conf*100:.1f}%",
-                    (ox + bar_w + 6, y + bar_h - 2),
+        y      = oy + rank * 20
+        conf   = float(probs[idx])
+        color  = (0, 220, 80) if rank == 0 else (80, 140, 200)
+        cv2.rectangle(frame, (ox, y), (ox + 120, y + 14), (40, 40, 40), -1)
+        cv2.rectangle(frame, (ox, y), (ox + int(120 * conf), y + 14), color, -1)
+        cv2.putText(frame, f"{get_letter(idx)} {conf*100:.1f}%",
+                    (ox + 126, y + 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+
+
+def hand_bbox(landmarks, h, w):
+    xs = [lm.x * w for lm in landmarks]
+    ys = [lm.y * h for lm in landmarks]
+    pad_x = (max(xs) - min(xs)) * PAD_FRAC
+    pad_y = (max(ys) - min(ys)) * PAD_FRAC
+    return (max(0, int(min(xs) - pad_x)), max(0, int(min(ys) - pad_y)),
+            min(w, int(max(xs) + pad_x)), min(h, int(max(ys) + pad_y)))
+
+
+# ── Startup model selection ───────────────────────────────────────────────────
+def choose_model(arg_model):
+    if arg_model:
+        return arg_model
+    print("\n┌─────────────────────────────────────────┐")
+    print("│   ASL Recognition — Select Model        │")
+    print("├─────────────────────────────────────────┤")
+    print("│  1.  Robust CNN     (Sign MNIST  28×28) │")
+    print("│  2.  Option A CNN   (Real photos 64×64) │")
+    print("│  3.  Option B MLP   (Landmarks,  fast)  │")
+    print("└─────────────────────────────────────────┘")
+    mapping = {'1': 'cnn', '2': 'optionA', '3': 'optionB'}
+    while True:
+        choice = input("Enter 1 / 2 / 3: ").strip()
+        if choice in mapping:
+            return mapping[choice]
+        print("Invalid — enter 1, 2, or 3.")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model',  choices=['cnn', 'optionA', 'optionB'], default=None)
     parser.add_argument('--camera', type=int, default=0)
     parser.add_argument('--no-landmarks', action='store_true')
-    parser.add_argument('--no-preview',   action='store_true')
-    parser.add_argument('--debug',        action='store_true',
-                        help='Save every hand crop to debug_crops/')
-    parser.add_argument('--prep', default='stretch',
-                        choices=PREP_MODES,
-                        help='Preprocessing mode (default: stretch)')
     args = parser.parse_args()
 
+    model_key  = choose_model(args.model)
+    model_path = MODEL_PATHS[model_key]
     show_landmarks = not args.no_landmarks
-    show_preview   = not args.no_preview
-    debug_mode     = args.debug
-    prep_mode_idx  = PREP_MODES.index(args.prep)
 
-    if debug_mode:
-        os.makedirs(DEBUG_DIR, exist_ok=True)
-        print(f"Debug crops → {DEBUG_DIR}")
+    # Check model file exists
+    if not os.path.exists(model_path):
+        print(f"\nModel file not found: {model_path}")
+        if model_key == 'optionA':
+            print("Train first: bonus/webcam_trials/train_option_a.ipynb")
+        elif model_key == 'optionB':
+            print("Train first: bonus/webcam_trials/train_option_b.ipynb")
+        sys.exit(1)
 
-    ensure_hand_model(HAND_MODEL_PATH, HAND_MODEL_URL)
-    interp, inp_det, out_det = load_asl_model(ASL_MODEL_PATH)
-    print(f"ASL model loaded: {ASL_MODEL_PATH}")
+    # Download hand model if needed
+    if not os.path.exists(HAND_MODEL_PATH):
+        print("Downloading hand_landmarker.task (~8 MB)...")
+        urllib.request.urlretrieve(HAND_MODEL_URL, HAND_MODEL_PATH)
 
+    # Load selected model
+    print(f"\nLoading model: {model_key} — {model_path}")
+    if model_key == 'cnn':
+        interp, inp_det, out_det = load_tflite(model_path)
+        input_size = inp_det[0]['shape'][1]   # 28
+        label_map  = ALPHABET_25
+        channels   = 1
+        n_classes  = 25
+    elif model_key == 'optionA':
+        interp, inp_det, out_det = load_tflite(model_path)
+        input_size = inp_det[0]['shape'][1]   # 64
+        label_map  = ALPHABET_26
+        channels   = inp_det[0]['shape'][3]   # 3 (RGB) or 1
+        n_classes  = 26
+    else:  # optionB
+        mlp, scaler, classes = load_optionB(model_path)
+        label_map  = classes
+        n_classes  = len(classes)
+
+    print(f"Model ready. Input: {input_size if model_key != 'optionB' else 'landmarks'}  Classes: {n_classes}")
+
+    # MediaPipe hand detector
     hand_options = mp_vision.HandLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=HAND_MODEL_PATH),
         running_mode=mp_vision.RunningMode.VIDEO,
@@ -207,20 +253,16 @@ def main():
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera {args.camera}.")
+        sys.exit(f"Cannot open camera {args.camera}.")
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    print("Camera opened.")
-    print("q=quit  s=save  l=landmarks  p=preview  d=debug  m=cycle-prep-mode")
+    print("Camera opened.  q=quit  s=save  l=landmarks\n")
 
     recent_preds = []
     smoothed     = '?'
-    last_probs   = np.ones(25, dtype=np.float32) / 25
-    fps          = 0.0
-    fps_timer    = time.time()
-    frame_count  = 0
+    last_probs   = np.ones(n_classes, dtype=np.float32) / n_classes
+    fps, fps_timer, frame_count = 0.0, time.time(), 0
     timestamp_ms = 0
-    debug_count  = 0
 
     while True:
         ret, frame = cap.read()
@@ -235,88 +277,76 @@ def main():
         result = hand_detector.detect_for_video(mp_img, timestamp_ms)
 
         hand_detected = len(result.hand_landmarks) > 0
-        prep_mode     = PREP_MODES[prep_mode_idx]
 
         if hand_detected:
             landmarks  = result.hand_landmarks[0]
-            handedness = result.handedness[0][0].category_name  # 'Left' or 'Right'
+            handedness = result.handedness[0][0].category_name
             x1, y1, x2, y2 = hand_bbox(landmarks, h, w)
 
-            crop = frame[y1:y2, x1:x2]
-            if crop.size > 0:
-                # Mirror left hand so it matches right-hand training data
-                if handedness == 'Left':
-                    crop = cv2.flip(crop, 1)
+            letter, conf = '?', 0.0
 
-                processed = preprocess(crop, mode=prep_mode)
-                letter, conf, last_probs = predict_asl(interp, inp_det, out_det, processed)
+            if model_key == 'optionB':
+                features              = landmarks_to_features(landmarks)
+                letter, conf, probs, _ = infer_optionB(mlp, scaler, classes, features)
+                last_probs            = probs
 
-                if debug_mode:
-                    save_img = (processed * 255).astype(np.uint8)
-                    cv2.imwrite(
-                        os.path.join(DEBUG_DIR, f"{debug_count:05d}_{letter}_{conf:.2f}.png"),
-                        save_img
+            else:
+                crop = frame[y1:y2, x1:x2]
+                if crop.size > 0:
+                    if handedness == 'Left':
+                        crop = cv2.flip(crop, 1)
+
+                    if model_key == 'cnn':
+                        img_arr, preview_gray = preprocess_cnn(crop, input_size)
+                    else:
+                        img_arr, preview_rgb  = preprocess_optionA(crop, input_size)
+
+                    pred_idx, conf, probs = infer_tflite(
+                        interp, inp_det, out_det, img_arr, channels
                     )
-                    debug_count += 1
+                    last_probs = probs
 
-                recent_preds.append(letter)
-                if len(recent_preds) > SMOOTH_N:
-                    recent_preds.pop(0)
-                smoothed = max(set(recent_preds), key=recent_preds.count)
+                    if isinstance(label_map, dict):
+                        letter = label_map.get(pred_idx, '?')
+                    else:
+                        letter = label_map[pred_idx] if pred_idx < len(label_map) else '?'
 
-                box_color = (0, 255, 80) if conf >= CONF_THRESH else (0, 165, 255)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+            recent_preds.append(letter)
+            if len(recent_preds) > SMOOTH_N:
+                recent_preds.pop(0)
+            smoothed = max(set(recent_preds), key=recent_preds.count)
 
-                # Handedness label on bbox
-                cv2.putText(frame, handedness[0],  # L or R
-                            (x2 - 22, y1 + 18),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 80), 2)
+            box_color = (0, 255, 80) if conf >= CONF_THRESH else (0, 165, 255)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+            cv2.putText(frame, handedness[0], (x2 - 22, y1 + 18),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 80), 2)
 
-                # 28x28 preview
-                if show_preview:
-                    preview_sz  = 84
-                    preview     = cv2.resize(
-                        (processed * 255).astype(np.uint8),
-                        (preview_sz, preview_sz), interpolation=cv2.INTER_NEAREST
-                    )
-                    preview_bgr = cv2.cvtColor(preview, cv2.COLOR_GRAY2BGR)
-                    px1, py1    = x2 + 4, y1
-                    px2, py2    = px1 + preview_sz, py1 + preview_sz
-                    if px2 < w and py2 < h:
-                        frame[py1:py2, px1:px2] = preview_bgr
-                        cv2.rectangle(frame, (px1, py1), (px2, py2), (100, 100, 100), 1)
-                        cv2.putText(frame, "28x28 input", (px1, py2 + 14),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (160, 160, 160), 1)
+            if show_landmarks:
+                draw_landmarks(frame, landmarks, h, w)
 
-                if show_landmarks:
-                    draw_landmarks(frame, landmarks, h, w)
-
-                pred_text = (f"{smoothed}  {conf*100:.0f}%"
-                             if conf >= CONF_THRESH else f"?  {conf*100:.0f}%")
-                cv2.putText(frame, pred_text, (x1, max(y1 - 12, 30)),
-                            cv2.FONT_HERSHEY_DUPLEX, 1.6, box_color, 3)
+            pred_text = (f"{smoothed}  {conf*100:.0f}%"
+                         if conf >= CONF_THRESH else f"?  {conf*100:.0f}%")
+            cv2.putText(frame, pred_text, (x1, max(y1 - 12, 30)),
+                        cv2.FONT_HERSHEY_DUPLEX, 1.6, box_color, 3)
         else:
             recent_preds.clear()
             cv2.putText(frame, "No hand detected", (20, h - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (60, 60, 200), 2)
 
-        draw_top5(frame, last_probs)
+        draw_top5(frame, last_probs, label_map)
 
-        # Status
-        prep_label = f"prep:{prep_mode}"
-        dbg_label  = " DBG" if debug_mode else ""
+        model_label = {'cnn': 'Robust CNN', 'optionA': 'Option A (Real CNN)',
+                       'optionB': 'Option B (Landmarks)'}[model_key]
         cv2.putText(frame,
-                    f"FPS {fps:.1f}  Hand:{'YES' if hand_detected else 'NO '}  {prep_label}{dbg_label}",
+                    f"FPS {fps:.1f}  [{model_label}]  Hand:{'YES' if hand_detected else 'NO'}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 2)
-        cv2.putText(frame, "q=quit  s=save  l=landmarks  p=preview  d=debug  m=prep-mode",
+        cv2.putText(frame, "q=quit  s=save  l=landmarks",
                     (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (120, 120, 120), 1)
 
         frame_count += 1
         now = time.time()
         if now - fps_timer >= 1.0:
-            fps         = frame_count / (now - fps_timer)
-            fps_timer   = now
-            frame_count = 0
+            fps, fps_timer, frame_count = frame_count / (now - fps_timer), now, 0
 
         cv2.imshow("ASL Sign Language Recognition", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -328,17 +358,6 @@ def main():
             print(f"Saved: {fname}")
         elif key == ord('l'):
             show_landmarks = not show_landmarks
-        elif key == ord('p'):
-            show_preview = not show_preview
-        elif key == ord('d'):
-            debug_mode = not debug_mode
-            if debug_mode:
-                os.makedirs(DEBUG_DIR, exist_ok=True)
-            print(f"Debug: {'ON → ' + DEBUG_DIR if debug_mode else 'OFF'}")
-        elif key == ord('m'):
-            prep_mode_idx = (prep_mode_idx + 1) % len(PREP_MODES)
-            recent_preds.clear()
-            print(f"Prep mode: {PREP_MODES[prep_mode_idx]}")
 
     cap.release()
     hand_detector.close()
