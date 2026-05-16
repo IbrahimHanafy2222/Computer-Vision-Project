@@ -7,11 +7,11 @@ Requirements:
 On first run, downloads hand_landmarker.task (~8 MB) automatically.
 
 Usage:
-    python Livestream.py                        # interactive model prompt
-    python Livestream.py --model cnn            # Robust CNN  (Sign MNIST 28×28)
-    python Livestream.py --model optionA        # Real-Photo CNN (ASL Alphabet 64×64)
-    python Livestream.py --model optionB        # Landmark MLP  (no pixels)
-    python Livestream.py --model cnn --camera 1
+    python Livestream.py                          # interactive model + camera prompt
+    python Livestream.py --model optionB          # Landmark MLP, prompt for camera
+    python Livestream.py --source webcam          # skip camera prompt, use physical webcam
+    python Livestream.py --source mobile          # skip camera prompt, use iVCam/EpocCam
+    python Livestream.py --model cnn --camera 1   # explicit camera index override
 
 Controls:
     q  — quit
@@ -19,9 +19,29 @@ Controls:
     l  — toggle landmark overlay
 """
 
-import argparse
 import os
 import sys
+
+# ── Silence all C++/TF/MediaPipe/sklearn warnings before any import ───────────
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL',    '3')
+os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS',   '0')
+os.environ.setdefault('GLOG_minloglevel',         '3')
+os.environ.setdefault('TF_ENABLE_DEPRECATION_WARNINGS', '0')
+
+import warnings
+warnings.filterwarnings('ignore')
+
+# Redirect C-level stderr noise (MediaPipe/XNNPACK INFO lines) to null
+import ctypes
+if sys.platform == 'win32':
+    try:
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+
+import argparse
+import platform
+import subprocess
 import time
 import urllib.request
 
@@ -82,7 +102,10 @@ def load_tflite(path):
 
 def load_optionB(path):
     import joblib
-    bundle = joblib.load(path)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        bundle = joblib.load(path)
     return bundle['mlp'], bundle['scaler'], bundle['classes']
 
 
@@ -178,26 +201,107 @@ def hand_bbox(landmarks, h, w):
 def choose_model(arg_model):
     if arg_model:
         return arg_model
-    print("\n┌─────────────────────────────────────────┐")
-    print("│   ASL Recognition — Select Model        │")
-    print("├─────────────────────────────────────────┤")
-    print("│  1.  Robust CNN     (Sign MNIST  28×28) │")
-    print("│  2.  Option A CNN   (Real photos 64×64) │")
-    print("│  3.  Option B MLP   (Landmarks,  fast)  │")
-    print("└─────────────────────────────────────────┘")
+    print("\n" + "="*52)
+    print("  ASL Sign Language Recognition")
+    print("="*52)
+    print("  Select inference model:")
+    print("    1.  Robust CNN       (Sign MNIST,  28x28 gray)")
+    print("    2.  Real-Photo CNN   (ASL Alphabet, 64x64 RGB) ")
+    print("    3.  Landmark MLP     (MediaPipe geometry) [RECOMMENDED]")
+    print()
     mapping = {'1': 'cnn', '2': 'optionA', '3': 'optionB'}
     while True:
-        choice = input("Enter 1 / 2 / 3: ").strip()
+        choice = input("  Enter 1 / 2 / 3: ").strip()
         if choice in mapping:
             return mapping[choice]
-        print("Invalid — enter 1, 2, or 3.")
+        print("  Please enter 1, 2, or 3.")
+
+
+# ── Camera enumeration & selection ────────────────────────────────────────────
+_PREF_FILE = os.path.join(SCRIPT_DIR, '.camera_pref')
+
+
+def enumerate_cameras():
+    """Return list of working camera indices (DSHOW order = OpenCV order on Windows)."""
+    backend = cv2.CAP_DSHOW if platform.system() == 'Windows' else cv2.CAP_ANY
+    found = []
+    for idx in range(8):
+        cap = cv2.VideoCapture(idx, backend)
+        if cap.isOpened():
+            found.append(idx)
+            cap.release()
+    return found
+
+
+def _load_pref():
+    try:
+        with open(_PREF_FILE) as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+
+def _save_pref(idx):
+    try:
+        with open(_PREF_FILE, 'w') as f:
+            f.write(str(idx))
+    except Exception:
+        pass
+
+
+def choose_camera(arg_camera, arg_source):
+    """Returns cv2.VideoCapture index."""
+    if arg_camera is not None:
+        return arg_camera
+
+    cameras = enumerate_cameras()
+    if not cameras:
+        print("No cameras found — defaulting to index 0.")
+        return 0
+
+    # --source flag: skip prompt entirely
+    # iVCam typically steals index 0 → webcam = last found, mobile = index 0
+    if arg_source == 'webcam':
+        cam = cameras[-1] if len(cameras) > 1 else cameras[0]
+        print(f"Webcam: index {cam}  (use --camera N to override)")
+        return cam
+    if arg_source == 'mobile':
+        print(f"Mobile/iVCam: index {cameras[0]}")
+        return cameras[0]
+
+    # Interactive prompt
+    labels = ['Mobile Camera', 'Webcam'] + [f'Camera {cameras[i]}' for i in range(2, len(cameras))]
+    print("\n  Select camera:")
+    for rank, (idx, lbl) in enumerate(zip(cameras, labels), 1):
+        print(f"    {rank}.  {lbl}")
+    print()
+
+    # Default: last index (iVCam steals lowest)
+    default_idx  = cameras[-1] if len(cameras) > 1 else cameras[0]
+    default_rank = cameras.index(default_idx) + 1
+
+    while True:
+        raw = input(f"  Enter number [default {default_rank}]: ").strip()
+        if raw == '':
+            chosen_idx = default_idx
+            break
+        if raw.isdigit() and 1 <= int(raw) <= len(cameras):
+            chosen_idx = cameras[int(raw) - 1]
+            break
+        print(f"  Enter a number between 1 and {len(cameras)}.")
+
+    print(f"  Camera {chosen_idx} selected.\n")
+    return chosen_idx
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model',  choices=['cnn', 'optionA', 'optionB'], default=None)
-    parser.add_argument('--camera', type=int, default=0)
+    parser.add_argument('--camera', type=int, default=None,
+                        help='Camera index override (skips camera prompt)')
+    parser.add_argument('--source', choices=['webcam', 'mobile'], default=None,
+                        help='webcam = physical camera (default), mobile = iVCam/EpocCam')
     parser.add_argument('--no-landmarks', action='store_true')
     args = parser.parse_args()
 
@@ -220,7 +324,7 @@ def main():
         urllib.request.urlretrieve(HAND_MODEL_URL, HAND_MODEL_PATH)
 
     # Load selected model
-    print(f"\nLoading model: {model_key} — {model_path}")
+    print(f"\n  Loading model: {model_key} ...")
     if model_key == 'cnn':
         interp, inp_det, out_det = load_tflite(model_path)
         input_size = inp_det[0]['shape'][1]   # 28
@@ -238,7 +342,8 @@ def main():
         label_map  = classes
         n_classes  = len(classes)
 
-    print(f"Model ready. Input: {input_size if model_key != 'optionB' else 'landmarks'}  Classes: {n_classes}")
+    label = {'cnn': 'Robust CNN', 'optionA': 'Real-Photo CNN', 'optionB': 'Landmark MLP'}[model_key]
+    print(f"  Model ready: {label}  ({n_classes} classes)")
 
     # MediaPipe hand detector
     hand_options = mp_vision.HandLandmarkerOptions(
@@ -251,12 +356,19 @@ def main():
     )
     hand_detector = mp_vision.HandLandmarker.create_from_options(hand_options)
 
-    cap = cv2.VideoCapture(args.camera)
+    cam_idx = choose_camera(args.camera, args.source)
+    # MSMF = Media Foundation — faster than DSHOW for actual capture on Windows
+    cap_backend = cv2.CAP_MSMF if platform.system() == 'Windows' else cv2.CAP_ANY
+    cap = cv2.VideoCapture(cam_idx, cap_backend)
     if not cap.isOpened():
-        sys.exit(f"Cannot open camera {args.camera}.")
+        # fallback to DSHOW if MSMF fails
+        cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        sys.exit(f"Cannot open camera {cam_idx}.")
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    print("Camera opened.  q=quit  s=save  l=landmarks\n")
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    print("\nCamera ready.  q = quit   s = save screenshot   l = toggle landmarks\n")
 
     recent_preds = []
     smoothed     = '?'

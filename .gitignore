@@ -1,6 +1,14 @@
 .claude
 .env
 .vscode/
+report.tex
+report.pdf
+report.aux
+report.log
+report.toc
+report.out
+report.bbl
+report.blg
 TEAM_GUIDE.md
 __pycache__/
 *.pyc
