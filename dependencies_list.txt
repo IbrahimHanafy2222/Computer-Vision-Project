@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+python-multipart
+Pillow
+tensorflow
+jinja2
+mediapipe
+joblib
+scikit-learn==1.6.1
+opencv-python
+numpy
+pandas
+matplotlib
+seaborn
+kaggle
+scikit-image
+jupyter

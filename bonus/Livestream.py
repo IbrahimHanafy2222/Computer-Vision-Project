@@ -22,7 +22,6 @@ Controls:
 import os
 import sys
 
-# ── Silence all C++/TF/MediaPipe/sklearn warnings before any import ───────────
 os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL',    '3')
 os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS',   '0')
 os.environ.setdefault('GLOG_minloglevel',         '3')
@@ -31,7 +30,6 @@ os.environ.setdefault('TF_ENABLE_DEPRECATION_WARNINGS', '0')
 import warnings
 warnings.filterwarnings('ignore')
 
-# Redirect C-level stderr noise (MediaPipe/XNNPACK INFO lines) to null
 import ctypes
 if sys.platform == 'win32':
     try:
@@ -51,7 +49,6 @@ import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
 HAND_MODEL_PATH = os.path.join(SCRIPT_DIR, "hand_landmarker.task")
 HAND_MODEL_URL  = (
@@ -65,17 +62,13 @@ MODEL_PATHS = {
     "optionB": os.path.join(SCRIPT_DIR, "webcam_trials", "models", "optionB.pkl"),
 }
 
-# ── Label maps ────────────────────────────────────────────────────────────────
-# CNN / Option B (25 classes — Sign MNIST, no J no Z)
 ALPHABET_25 = {
     0:'A', 1:'B', 2:'C', 3:'D', 4:'E', 5:'F', 6:'G', 7:'H', 8:'I',
     10:'K', 11:'L', 12:'M', 13:'N', 14:'O', 15:'P', 16:'Q', 17:'R',
     18:'S', 19:'T', 20:'U', 21:'V', 22:'W', 23:'X', 24:'Y'
 }
-# Option A (26 classes — A-Z real photos)
 ALPHABET_26 = {i: chr(65 + i) for i in range(26)}
 
-# ── Hand skeleton ─────────────────────────────────────────────────────────────
 HAND_CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,4),
     (0,5),(5,6),(6,7),(7,8),
@@ -86,19 +79,15 @@ HAND_CONNECTIONS = [
 ]
 FINGERTIPS = {4, 8, 12, 16, 20}
 
-# ── Smoothing ─────────────────────────────────────────────────────────────────
 SMOOTH_N  = 7
 CONF_THRESH = 0.5
 PAD_FRAC  = 0.20
 
-
-# ── Model loaders ─────────────────────────────────────────────────────────────
 def load_tflite(path):
     import tensorflow as tf
     interp = tf.lite.Interpreter(model_path=path)
     interp.allocate_tensors()
     return interp, interp.get_input_details(), interp.get_output_details()
-
 
 def load_optionB(path):
     import joblib
@@ -108,10 +97,7 @@ def load_optionB(path):
         bundle = joblib.load(path)
     return bundle['mlp'], bundle['scaler'], bundle['classes']
 
-
-# ── Preprocessing ─────────────────────────────────────────────────────────────
 def preprocess_cnn(crop_bgr, input_size):
-    """Stretch histogram → resize → float32 [0,1]."""
     gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
     lo, hi = gray.min(), gray.max()
     if hi > lo:
@@ -119,25 +105,19 @@ def preprocess_cnn(crop_bgr, input_size):
     resized = cv2.resize(gray, (input_size, input_size), interpolation=cv2.INTER_AREA)
     return resized.astype(np.float32) / 255.0, resized
 
-
 def preprocess_optionA(crop_bgr, input_size=64):
-    """RGB resize → float32 [0,1] for real-photo model."""
     rgb     = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
     resized = cv2.resize(rgb, (input_size, input_size), interpolation=cv2.INTER_AREA)
     return resized.astype(np.float32) / 255.0, resized
 
-
 def landmarks_to_features(landmarks):
-    """21 MediaPipe landmarks → 63-dim normalised feature vector."""
     pts = np.array([[lm.x, lm.y, lm.z] for lm in landmarks], dtype=np.float32)
-    pts -= pts[0]                          # translate: wrist at origin
-    scale = np.linalg.norm(pts[9])        # wrist→middle-MCP distance
+    pts -= pts[0]
+    scale = np.linalg.norm(pts[9])
     if scale > 1e-6:
         pts /= scale
-    return pts.flatten()                   # (63,)
+    return pts.flatten()
 
-
-# ── Inference ─────────────────────────────────────────────────────────────────
 def infer_tflite(interp, inp_det, out_det, img_array, channels):
     if channels == 1:
         tensor = img_array.reshape(1, img_array.shape[0], img_array.shape[1], 1)
@@ -149,17 +129,13 @@ def infer_tflite(interp, inp_det, out_det, img_array, channels):
     pred_idx = int(np.argmax(probs))
     return pred_idx, float(probs[pred_idx]), probs
 
-
 def infer_optionB(mlp, scaler, classes, features):
     feat_scaled = scaler.transform(features.reshape(1, -1))
     probs       = mlp.predict_proba(feat_scaled)[0]
     pred_idx    = int(np.argmax(probs))
-    # classes is an array of label strings (e.g. ['A','B',...])
     letter      = classes[pred_idx] if pred_idx < len(classes) else '?'
     return letter, float(probs[pred_idx]), probs, classes
 
-
-# ── Drawing helpers ───────────────────────────────────────────────────────────
 def draw_landmarks(frame, landmarks, h, w):
     pts = {i: (int(lm.x * w), int(lm.y * h)) for i, lm in enumerate(landmarks)}
     for a, b in HAND_CONNECTIONS:
@@ -168,7 +144,6 @@ def draw_landmarks(frame, landmarks, h, w):
         r = 6 if i in FINGERTIPS else 3
         cv2.circle(frame, (x, y), r, (255, 255, 255), -1)
         cv2.circle(frame, (x, y), r, (0, 180, 255), 1)
-
 
 def draw_top5(frame, probs, label_map, origin=(10, 60)):
     if isinstance(label_map, np.ndarray):
@@ -187,7 +162,6 @@ def draw_top5(frame, probs, label_map, origin=(10, 60)):
                     (ox + 126, y + 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
 
-
 def hand_bbox(landmarks, h, w):
     xs = [lm.x * w for lm in landmarks]
     ys = [lm.y * h for lm in landmarks]
@@ -196,8 +170,6 @@ def hand_bbox(landmarks, h, w):
     return (max(0, int(min(xs) - pad_x)), max(0, int(min(ys) - pad_y)),
             min(w, int(max(xs) + pad_x)), min(h, int(max(ys) + pad_y)))
 
-
-# ── Startup model selection ───────────────────────────────────────────────────
 def choose_model(arg_model):
     if arg_model:
         return arg_model
@@ -216,13 +188,9 @@ def choose_model(arg_model):
             return mapping[choice]
         print("  Please enter 1, 2, or 3.")
 
-
-# ── Camera enumeration & selection ────────────────────────────────────────────
 _PREF_FILE = os.path.join(SCRIPT_DIR, '.camera_pref')
 
-
 def enumerate_cameras():
-    """Return list of working camera indices (DSHOW order = OpenCV order on Windows)."""
     backend = cv2.CAP_DSHOW if platform.system() == 'Windows' else cv2.CAP_ANY
     found = []
     for idx in range(8):
@@ -232,14 +200,12 @@ def enumerate_cameras():
             cap.release()
     return found
 
-
 def _load_pref():
     try:
         with open(_PREF_FILE) as f:
             return int(f.read().strip())
     except Exception:
         return None
-
 
 def _save_pref(idx):
     try:
@@ -248,9 +214,7 @@ def _save_pref(idx):
     except Exception:
         pass
 
-
 def choose_camera(arg_camera, arg_source):
-    """Returns cv2.VideoCapture index."""
     if arg_camera is not None:
         return arg_camera
 
@@ -259,8 +223,6 @@ def choose_camera(arg_camera, arg_source):
         print("No cameras found — defaulting to index 0.")
         return 0
 
-    # --source flag: skip prompt entirely
-    # iVCam typically steals index 0 → webcam = last found, mobile = index 0
     if arg_source == 'webcam':
         cam = cameras[-1] if len(cameras) > 1 else cameras[0]
         print(f"Webcam: index {cam}  (use --camera N to override)")
@@ -269,14 +231,12 @@ def choose_camera(arg_camera, arg_source):
         print(f"Mobile/iVCam: index {cameras[0]}")
         return cameras[0]
 
-    # Interactive prompt
     labels = ['Mobile Camera', 'Webcam'] + [f'Camera {cameras[i]}' for i in range(2, len(cameras))]
     print("\n  Select camera:")
     for rank, (idx, lbl) in enumerate(zip(cameras, labels), 1):
         print(f"    {rank}.  {lbl}")
     print()
 
-    # Default: last index (iVCam steals lowest)
     default_idx  = cameras[-1] if len(cameras) > 1 else cameras[0]
     default_rank = cameras.index(default_idx) + 1
 
@@ -293,8 +253,6 @@ def choose_camera(arg_camera, arg_source):
     print(f"  Camera {chosen_idx} selected.\n")
     return chosen_idx
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model',  choices=['cnn', 'optionA', 'optionB'], default=None)
@@ -309,7 +267,6 @@ def main():
     model_path = MODEL_PATHS[model_key]
     show_landmarks = not args.no_landmarks
 
-    # Check model file exists
     if not os.path.exists(model_path):
         print(f"\nModel file not found: {model_path}")
         if model_key == 'optionA':
@@ -318,26 +275,24 @@ def main():
             print("Train first: bonus/webcam_trials/train_option_b.ipynb")
         sys.exit(1)
 
-    # Download hand model if needed
     if not os.path.exists(HAND_MODEL_PATH):
         print("Downloading hand_landmarker.task (~8 MB)...")
         urllib.request.urlretrieve(HAND_MODEL_URL, HAND_MODEL_PATH)
 
-    # Load selected model
     print(f"\n  Loading model: {model_key} ...")
     if model_key == 'cnn':
         interp, inp_det, out_det = load_tflite(model_path)
-        input_size = inp_det[0]['shape'][1]   # 28
+        input_size = inp_det[0]['shape'][1]
         label_map  = ALPHABET_25
         channels   = 1
         n_classes  = 25
     elif model_key == 'optionA':
         interp, inp_det, out_det = load_tflite(model_path)
-        input_size = inp_det[0]['shape'][1]   # 64
+        input_size = inp_det[0]['shape'][1]
         label_map  = ALPHABET_26
-        channels   = inp_det[0]['shape'][3]   # 3 (RGB) or 1
+        channels   = inp_det[0]['shape'][3]
         n_classes  = 26
-    else:  # optionB
+    else:
         mlp, scaler, classes = load_optionB(model_path)
         label_map  = classes
         n_classes  = len(classes)
@@ -345,7 +300,6 @@ def main():
     label = {'cnn': 'Robust CNN', 'optionA': 'Real-Photo CNN', 'optionB': 'Landmark MLP'}[model_key]
     print(f"  Model ready: {label}  ({n_classes} classes)")
 
-    # MediaPipe hand detector
     hand_options = mp_vision.HandLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=HAND_MODEL_PATH),
         running_mode=mp_vision.RunningMode.VIDEO,
@@ -357,11 +311,9 @@ def main():
     hand_detector = mp_vision.HandLandmarker.create_from_options(hand_options)
 
     cam_idx = choose_camera(args.camera, args.source)
-    # MSMF = Media Foundation — faster than DSHOW for actual capture on Windows
     cap_backend = cv2.CAP_MSMF if platform.system() == 'Windows' else cv2.CAP_ANY
     cap = cv2.VideoCapture(cam_idx, cap_backend)
     if not cap.isOpened():
-        # fallback to DSHOW if MSMF fails
         cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
     if not cap.isOpened():
         sys.exit(f"Cannot open camera {cam_idx}.")
@@ -474,7 +426,6 @@ def main():
     cap.release()
     hand_detector.close()
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
